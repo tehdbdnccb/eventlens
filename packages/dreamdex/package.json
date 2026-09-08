@@ -1,0 +1,1 @@
+{"name":"@eventlens/dreamdex","version":"0.2.0","private":true,"type":"module","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"build":"tsc -p tsconfig.json","typecheck":"tsc -p tsconfig.json --noEmit"},"dependencies":{"@eventlens/shared":"0.2.0","@somnia-chain/markets-sdk":"^0.29.0","viem":"^2.21.54"}}

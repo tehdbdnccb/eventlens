@@ -1,0 +1,26 @@
+{
+  "name": "eventlens",
+  "version": "0.2.0",
+  "private": true,
+  "packageManager": "npm@10",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "concurrently -k \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm --workspace @eventlens/api run dev",
+    "dev:web": "npm --workspace @eventlens/web run dev",
+    "build": "npm run typecheck && npm run build:packages && npm run build:apps",
+    "build:packages": "npm --workspace @eventlens/shared run build && npm --workspace @eventlens/quant run build && npm --workspace @eventlens/risk run build && npm --workspace @eventlens/dreamdex run build",
+    "build:apps": "npm --workspace @eventlens/api run build && npm --workspace @eventlens/web run build",
+    "typecheck": "npm --workspace @eventlens/shared run typecheck && npm --workspace @eventlens/quant run typecheck && npm --workspace @eventlens/risk run typecheck && npm --workspace @eventlens/dreamdex run typecheck && npm --workspace @eventlens/api run typecheck && npm --workspace @eventlens/web run typecheck",
+    "test": "npm --workspace @eventlens/quant run test && npm --workspace @eventlens/risk run test",
+    "check": "npm run test && npm run build",
+    "clean": "rm -rf node_modules apps/*/dist packages/*/dist"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
