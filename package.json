@@ -2,7 +2,7 @@
   "name": "eventlens",
   "version": "0.2.0",
   "private": true,
-  "packageManager": "npm@10",
+  "packageManager": "npm@10.9.2",
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev": "concurrently -k \"npm run dev:api\" \"npm run dev:web\"",
