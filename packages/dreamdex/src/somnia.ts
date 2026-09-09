@@ -13,80 +13,137 @@ export interface SomniaConfig {
 export class SomniaDreamDexAdapter implements DreamDexAdapter {
   private exchange: any;
   private config: SomniaConfig;
-  private initPromise: Promise<void> | null = null;
-  private isInitialized = false;
+  private lastError: Error | null = null;
 
   constructor(config: SomniaConfig) {
     this.config = config;
-    const isMainnet = config.network === 'mainnet';
-    this.exchange = new SomniaMarkets({
-      indexerUrl: config.indexerUrl,
-      wsRpcUrl: config.wsRpcUrl,
-      chain: isMainnet ? somniaMainnet : somniaShannon,
-      addresses: isMainnet ? SOMNIA_MAINNET_ADDRESSES : SOMNIA_TESTNET_ADDRESSES,
-      ...(config.privateKey ? { privateKey: config.privateKey } : {}),
+    console.log(`[SomniaDreamDexAdapter] Constructor called with:`, {
+      network: config.network,
+      indexerUrl: config.indexerUrl.substring(0, 50) + '...',
+      wsRpcUrl: config.wsRpcUrl.substring(0, 50) + '...',
+      hasPrivateKey: !!config.privateKey,
     });
-    console.log(`[SomniaDreamDexAdapter] Initialized with network=${config.network}, indexer=${config.indexerUrl}`);
-  }
 
-  private async ensureInitialized(): Promise<void> {
-    if (this.isInitialized) return;
-    if (this.initPromise) return this.initPromise;
-
-    this.initPromise = (async () => {
-      try {
-        // Try to load markets once to verify connectivity
-        const markets = await this.exchange.loadMarkets(true);
-        console.log(`[SomniaDreamDexAdapter] Connectivity check passed, ${Object.keys(markets).length} markets loaded`);
-        this.isInitialized = true;
-      } catch (error) {
-        console.error('[SomniaDreamDexAdapter] Initialization check failed:', error instanceof Error ? error.message : String(error));
-        throw error;
-      }
-    })();
-
-    return this.initPromise;
+    try {
+      const isMainnet = config.network === 'mainnet';
+      const chainConfig = isMainnet ? somniaMainnet : somniaShannon;
+      const addresses = isMainnet ? SOMNIA_MAINNET_ADDRESSES : SOMNIA_TESTNET_ADDRESSES;
+      
+      console.log(`[SomniaDreamDexAdapter] Initializing SomniaMarkets with chain=${config.network}`);
+      
+      this.exchange = new SomniaMarkets({
+        indexerUrl: config.indexerUrl,
+        wsRpcUrl: config.wsRpcUrl,
+        chain: chainConfig,
+        addresses: addresses,
+        ...(config.privateKey ? { privateKey: config.privateKey } : {}),
+      });
+      
+      console.log(`[SomniaDreamDexAdapter] SomniaMarkets instance created successfully`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[SomniaDreamDexAdapter] Constructor error:`, msg, error);
+      this.lastError = error instanceof Error ? error : new Error(msg);
+      throw error;
+    }
   }
 
   async discoverMarkets(): Promise<Market[]> {
+    console.log(`[SomniaDreamDexAdapter] discoverMarkets() called`);
+    
     try {
-      // Ensure exchange is initialized
-      await this.ensureInitialized();
+      // Verify exchange object exists
+      if (!this.exchange) {
+        throw new Error('Exchange not initialized');
+      }
 
-      console.log('[SomniaDreamDexAdapter] Loading markets...');
-      const rawMarkets = await this.exchange.loadMarkets(true);
+      console.log(`[SomniaDreamDexAdapter] Calling loadMarkets(true)...`);
+      const startTime = Date.now();
       
-      if (!rawMarkets || typeof rawMarkets !== 'object') {
-        console.warn('[SomniaDreamDexAdapter] loadMarkets returned invalid data:', typeof rawMarkets);
+      let rawMarkets: any;
+      try {
+        rawMarkets = await this.exchange.loadMarkets(true);
+        const duration = Date.now() - startTime;
+        console.log(`[SomniaDreamDexAdapter] loadMarkets completed in ${duration}ms, type: ${typeof rawMarkets}`);
+      } catch (loadError) {
+        const msg = loadError instanceof Error ? loadError.message : String(loadError);
+        console.error(`[SomniaDreamDexAdapter] loadMarkets threw error:`, msg);
+        throw new Error(`loadMarkets failed: ${msg}`);
+      }
+
+      // Validate response
+      if (!rawMarkets) {
+        console.warn(`[SomniaDreamDexAdapter] loadMarkets returned null/undefined`);
+        return [];
+      }
+
+      if (typeof rawMarkets !== 'object') {
+        console.warn(`[SomniaDreamDexAdapter] loadMarkets returned invalid type: ${typeof rawMarkets}`);
         return [];
       }
 
       const rows = Object.values(rawMarkets) as any[];
-      console.log(`[SomniaDreamDexAdapter] Loaded ${rows.length} total markets from exchange`);
+      console.log(`[SomniaDreamDexAdapter] Loaded ${rows.length} total markets, keys: ${Object.keys(rawMarkets).slice(0, 5).join(',')}`);
 
       if (rows.length === 0) {
-        console.warn('[SomniaDreamDexAdapter] No markets returned from loadMarkets');
+        console.warn(`[SomniaDreamDexAdapter] No markets returned from loadMarkets`);
         return [];
       }
 
-      // Log first few markets for debugging
-      rows.slice(0, 3).forEach((m: any) => {
-        console.log(`[SomniaDreamDexAdapter] Market sample: id=${m.info?.marketId}, active=${m.active}, type=${m.info?.marketType}, outcomes=${m.outcomes?.length}`);
+      // Log detailed sample of first market
+      if (rows.length > 0) {
+        const sample = rows[0];
+        console.log(`[SomniaDreamDexAdapter] First market structure:`, {
+          hasInfo: !!sample.info,
+          hasOutcomes: !!sample.outcomes,
+          hasActive: 'active' in sample,
+          active: sample.active,
+          marketType: sample.info?.marketType,
+          marketId: sample.info?.marketId,
+          symbol: sample.symbol,
+          outcomesLength: sample.outcomes?.length,
+        });
+
+        // Log first 3 markets
+        rows.slice(0, 3).forEach((m: any, i: number) => {
+          console.log(`[SomniaDreamDexAdapter] Market ${i}: id=${m.info?.marketId}, active=${m.active}, type=${m.info?.marketType}`);
+        });
+      }
+
+      // Try binary filter
+      console.log(`[SomniaDreamDexAdapter] Filtering for active binary markets...`);
+      const binaryMarkets = rows.filter((x: any) => {
+        const active = x.active === true;
+        const isBinary = x.info?.marketType === 'binary';
+        return active && isBinary;
       });
+      
+      console.log(`[SomniaDreamDexAdapter] Binary filter result: ${binaryMarkets.length} markets (from ${rows.length} total)`);
 
-      // Filter for active binary markets
-      const binaryMarkets = rows.filter((x: any) => x.active && x.info?.marketType === 'binary');
-      console.log(`[SomniaDreamDexAdapter] Filtered to ${binaryMarkets.length} active binary markets`);
-
+      // If no binary markets, try alternative filters
       if (binaryMarkets.length === 0) {
-        console.warn('[SomniaDreamDexAdapter] No active binary markets found. Returning first 10 markets regardless of filter:');
-        // Fallback: return first 10 markets for testing, with logging
-        return rows.slice(0, 10).map((x: any, idx: number) => {
+        console.warn(`[SomniaDreamDexAdapter] No active binary markets. Trying fallback filters...`);
+        
+        const activeOnly = rows.filter((x: any) => x.active === true);
+        console.log(`[SomniaDreamDexAdapter] Active markets (any type): ${activeOnly.length}`);
+        
+        const binaryOnly = rows.filter((x: any) => x.info?.marketType === 'binary');
+        console.log(`[SomniaDreamDexAdapter] Binary markets (any status): ${binaryOnly.length}`);
+        
+        // Use whichever has more data
+        let fallbackMarkets = activeOnly.length > 0 ? activeOnly : binaryOnly;
+        if (fallbackMarkets.length === 0) {
+          fallbackMarkets = rows;
+        }
+
+        console.log(`[SomniaDreamDexAdapter] Using fallback: ${fallbackMarkets.length} markets`);
+        
+        return fallbackMarkets.slice(0, 20).map((x: any, idx: number) => {
           const i = x.info || {};
           const up = x.outcomes?.[0];
           const down = x.outcomes?.[1];
           const upPrice = Number(up?.price ?? 0.5);
-          console.log(`[SomniaDreamDexAdapter] Fallback market ${idx}: ${i.marketId || 'unknown'}, active=${x.active}, type=${i.marketType}`);
+          
           return {
             id: String(i.marketId || `market-${idx}`),
             marketId: String(i.marketId || `market-${idx}`),
@@ -105,7 +162,7 @@ export class SomniaDreamDexAdapter implements DreamDexAdapter {
         });
       }
 
-      // Map filtered markets to Market type
+      // Map binary markets to Market type
       const markets = binaryMarkets.map((x: any) => {
         const i = x.info;
         const up = x.outcomes?.[0];
@@ -128,10 +185,12 @@ export class SomniaDreamDexAdapter implements DreamDexAdapter {
         } as Market;
       });
 
-      console.log(`[SomniaDreamDexAdapter] Returning ${markets.length} markets`);
+      console.log(`[SomniaDreamDexAdapter] Returning ${markets.length} binary markets`);
       return markets;
     } catch (error) {
-      console.error('[SomniaDreamDexAdapter] discoverMarkets error:', error instanceof Error ? error.message : String(error));
+      const msg = error instanceof Error ? error.message : String(error);
+      this.lastError = error instanceof Error ? error : new Error(msg);
+      console.error(`[SomniaDreamDexAdapter] discoverMarkets error:`, msg, error);
       throw error;
     }
   }
@@ -152,7 +211,7 @@ export class SomniaDreamDexAdapter implements DreamDexAdapter {
         asks: (b.asks ?? []).map((x: any) => ({ price: Number(x[0]), quantity: Number(x[1]) })),
       };
     } catch (error) {
-      console.error(`[SomniaDreamDexAdapter] orderBook error for ${marketId}:`, error instanceof Error ? error.message : String(error));
+      console.error(`[SomniaDreamDexAdapter] orderBook error:`, error instanceof Error ? error.message : String(error));
       return { bids: [], asks: [] };
     }
   }
@@ -195,7 +254,7 @@ export class SomniaDreamDexAdapter implements DreamDexAdapter {
         timestamp: Date.now(),
       };
     } catch (error) {
-      console.error('[SomniaDreamDexAdapter] execute error:', error instanceof Error ? error.message : String(error));
+      console.error(`[SomniaDreamDexAdapter] execute error:`, error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
@@ -204,9 +263,13 @@ export class SomniaDreamDexAdapter implements DreamDexAdapter {
     try {
       return this.exchange.listTrades?.() ?? [];
     } catch (error) {
-      console.warn('[SomniaDreamDexAdapter] listTrades not available:', error instanceof Error ? error.message : String(error));
+      console.warn(`[SomniaDreamDexAdapter] listTrades unavailable:`, error instanceof Error ? error.message : String(error));
       return [];
     }
+  }
+
+  getLastError(): Error | null {
+    return this.lastError;
   }
 }
 
