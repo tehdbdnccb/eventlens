@@ -1,5 +1,6 @@
 import type {Market,Signal,RiskResult,Side} from '@eventlens/shared';
 export interface RiskLimits {maxTradeSize:number; maxExposure:number; minEdge:number; minConfidence:number; minTimeRemaining:number; maxSlippage:number;}
-export const DEFAULT_RISK:RiskLimits={maxTradeSize:10,maxExposure:50,minEdge:.03,minConfidence:65,minTimeRemaining:60,maxSlippage:.01};
+export const DEFAULT_RISK:RiskLimits={maxTradeSize:10,maxExposure:50,minEdge:.03,minConfidence:65,minTimeRemaining:60,maxSlippage:.05};
 export function estimateSlippage(price:number,spread:number,quantity:number,liquidity:number){return Math.min(1,(spread/Math.max(price,.0001))+(quantity/Math.max(liquidity,1)));}
 export function evaluateTrade(market:Market,signal:Signal,side:Side,quantity:number,existingExposure:number,limits=DEFAULT_RISK,now=Date.now()):RiskResult{const checks={trading:market.status==='TRADING',timeRemaining:(market.expiry-now)/1000>=limits.minTimeRemaining,edge:Math.abs(signal.edge)>=limits.minEdge,confidence:signal.confidence>=limits.minConfidence,size:quantity>0&&quantity<=limits.maxTradeSize,exposure:existingExposure+quantity<=limits.maxExposure,liquidity:market.liquidity>quantity*20,slippage:estimateSlippage(side==='UP'?market.upPrice:market.downPrice,market.spread,quantity,market.liquidity)<=limits.maxSlippage}; const reasons=Object.entries(checks).filter(([,v])=>!v).map(([k])=>k); return {allowed:reasons.length===0,checks,reasons};}
+
