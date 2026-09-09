@@ -3,25 +3,16 @@ import { detail, execute, preview, snapshot, trades, isLiveMode, getAdapterStatu
 import { createMarketStream, getMarketStreamStatus } from '../services/liveMarketService.js';
 
 export async function apiRoutes(app: FastifyInstance) {
-  // Health check - shows if running in demo or live mode
+  // Health check
   app.get('/health', async () => ({
     ok: true,
     service: 'eventlens-api',
-    mode: isLiveMode() ? 'live' : 'demo',
     timestamp: new Date().toISOString(),
     adapter: getAdapterStatus(),
     stream: getMarketStreamStatus(),
-    dreamdex: isLiveMode()
-      ? {
-          connected: true,
-          network: process.env.SOMNIA_NETWORK || 'shannon',
-          indexer: process.env.SOMNIA_INDEXER_URL ? 'configured' : 'not-configured',
-          wsRpc: process.env.SOMNIA_WS_RPC_URL ? 'configured' : 'not-configured',
-        }
-      : {
-          connected: false,
-          message: 'Set DEMO_MODE=false to enable DREAMDEX testnet',
-        },
+    note: process.env.USE_SYNTHETIC === 'true' 
+      ? 'Running with SYNTHETIC hardcoded binary market data' 
+      : 'Set USE_SYNTHETIC=true for synthetic markets, DEMO_MODE=true for demo, or configure Somnia for live',
   }));
 
   // REST endpoints
@@ -31,7 +22,7 @@ export async function apiRoutes(app: FastifyInstance) {
     try {
       return await detail(req.params.id);
     } catch (error) {
-      app.log.error({ err: error }, 'Error fetching market detail:');
+      app.log.error('Error fetching market detail:', error);
       return {
         error: error instanceof Error ? error.message : 'Failed to fetch market',
         statusCode: 500,
@@ -40,14 +31,13 @@ export async function apiRoutes(app: FastifyInstance) {
   });
 
   app.get('/positions', async () => trades());
-
   app.get('/trades', async () => trades());
 
   app.post('/trades/preview', async (req: any) => {
     try {
       return await preview(req.body);
     } catch (error) {
-      app.log.error({ err: error }, 'Error previewing trade:');
+      app.log.error('Error previewing trade:', error);
       return {
         ok: false,
         reasons: [error instanceof Error ? error.message : 'Preview failed'],
@@ -60,7 +50,7 @@ export async function apiRoutes(app: FastifyInstance) {
     try {
       return await execute(req.body);
     } catch (error) {
-      app.log.error({ err: error }, 'Error executing trade:');
+      app.log.error('Error executing trade:', error);
       return {
         ok: false,
         reasons: [error instanceof Error ? error.message : 'Execution failed'],
@@ -83,22 +73,21 @@ export async function apiRoutes(app: FastifyInstance) {
         socket.send(
           JSON.stringify({
             type: 'info',
-            mode: 'demo',
-            message: 'Running in DEMO mode. Set DEMO_MODE=false in environment to connect DREAMDEX testnet.',
+            message: 'EventLens API not in live mode. Set USE_SYNTHETIC=true, DEMO_MODE=true, or configure Somnia.',
             timestamp: Date.now(),
           })
         );
       } catch (error) {
-        app.log.error({ err: error }, `[${clientId}] Error sending demo mode message:`);
+        app.log.error(`[${clientId}] Error sending info:`, error);
       }
-      socket.close(1008, 'Demo mode: DREAMDEX not enabled');
+      socket.close(1008, 'Live mode not enabled');
       return;
     }
 
     try {
       const stream = createMarketStream({
-        pollIntervalMs: 2000,
-        minIntervalMs: 500,
+        pollIntervalMs: process.env.USE_SYNTHETIC === 'true' ? 1000 : 2000,
+        minIntervalMs: 300,
       });
 
       const unsubscribe = stream.subscribe((markets) => {
@@ -109,6 +98,7 @@ export async function apiRoutes(app: FastifyInstance) {
                 type: 'markets',
                 timestamp: Date.now(),
                 count: markets.length,
+                mode: getAdapterStatus().mode,
                 markets:
                   markets.length > 0
                     ? markets.map(m => ({
@@ -116,9 +106,9 @@ export async function apiRoutes(app: FastifyInstance) {
                         marketId: m.marketId,
                         symbol: m.symbol,
                         asset: m.asset,
-                        currentPrice: m.currentPrice,
-                        upPrice: m.upPrice,
-                        downPrice: m.downPrice,
+                        currentPrice: Number(m.currentPrice.toFixed(4)),
+                        upPrice: Number(m.upPrice.toFixed(4)),
+                        downPrice: Number(m.downPrice.toFixed(4)),
                         liquidity: m.liquidity,
                         status: m.status,
                         expiry: m.expiry,
@@ -127,7 +117,7 @@ export async function apiRoutes(app: FastifyInstance) {
               })
             );
           } catch (error) {
-            app.log.warn({ err: error }, `[${clientId}] Error sending market data:`);
+            app.log.warn(`[${clientId}] Error sending market data:`, error instanceof Error ? error.message : String(error));
           }
         }
       }, clientId);
@@ -137,23 +127,22 @@ export async function apiRoutes(app: FastifyInstance) {
         unsubscribe();
       });
 
-      socket.on('error', (error: Error) => {
-        app.log.error({ err: error }, `[${clientId}] WebSocket error:`);
+      socket.on('error', (error) => {
+        app.log.error(`[${clientId}] WebSocket error:`, error);
         unsubscribe();
       });
 
-      // Send initial connection confirmation
+      // Send connection confirmation
       socket.send(
         JSON.stringify({
           type: 'connected',
           clientId,
-          mode: 'live',
-          network: process.env.SOMNIA_NETWORK || 'shannon',
+          mode: getAdapterStatus().mode,
           timestamp: Date.now(),
         })
       );
     } catch (error) {
-      app.log.error({ err: error }, `[${clientId}] Error setting up market stream:`);
+      app.log.error(`[${clientId}] Error setting up market stream:`, error);
       try {
         socket.send(
           JSON.stringify({
@@ -163,7 +152,7 @@ export async function apiRoutes(app: FastifyInstance) {
           })
         );
       } catch (sendError) {
-        app.log.error({ err: sendError }, `[${clientId}] Error sending error message:`);
+        app.log.error(`[${clientId}] Error sending error message:`, sendError);
       }
       socket.close(1011, 'Internal server error');
     }
