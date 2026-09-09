@@ -22,7 +22,7 @@ export async function apiRoutes(app: FastifyInstance) {
     try {
       return await detail(req.params.id);
     } catch (error) {
-      app.log.error('Error fetching market detail:', error);
+      app.log.error({ err: error }, 'Error fetching market detail:');
       return {
         error: error instanceof Error ? error.message : 'Failed to fetch market',
         statusCode: 500,
@@ -37,7 +37,7 @@ export async function apiRoutes(app: FastifyInstance) {
     try {
       return await preview(req.body);
     } catch (error) {
-      app.log.error('Error previewing trade:', error);
+      app.log.error({ err: error }, 'Error previewing trade:');
       return {
         ok: false,
         reasons: [error instanceof Error ? error.message : 'Preview failed'],
@@ -50,7 +50,7 @@ export async function apiRoutes(app: FastifyInstance) {
     try {
       return await execute(req.body);
     } catch (error) {
-      app.log.error('Error executing trade:', error);
+      app.log.error({ err: error }, 'Error executing trade:');
       return {
         ok: false,
         reasons: [error instanceof Error ? error.message : 'Execution failed'],
@@ -78,7 +78,7 @@ export async function apiRoutes(app: FastifyInstance) {
           })
         );
       } catch (error) {
-        app.log.error(`[${clientId}] Error sending info:`, error);
+        app.log.error({ err: error }, `[${clientId}] Error sending info:`);
       }
       socket.close(1008, 'Live mode not enabled');
       return;
@@ -117,7 +117,7 @@ export async function apiRoutes(app: FastifyInstance) {
               })
             );
           } catch (error) {
-            app.log.warn(`[${clientId}] Error sending market data:`, error instanceof Error ? error.message : String(error));
+            app.log.warn({ err: error }, `[${clientId}] Error sending market data:`);
           }
         }
       }, clientId);
@@ -127,8 +127,8 @@ export async function apiRoutes(app: FastifyInstance) {
         unsubscribe();
       });
 
-      socket.on('error', (error) => {
-        app.log.error(`[${clientId}] WebSocket error:`, error);
+      socket.on('error', (error: Error) => {
+        app.log.error({ err: error }, `[${clientId}] WebSocket error:`);
         unsubscribe();
       });
 
@@ -142,7 +142,7 @@ export async function apiRoutes(app: FastifyInstance) {
         })
       );
     } catch (error) {
-      app.log.error(`[${clientId}] Error setting up market stream:`, error);
+      app.log.error({ err: error }, `[${clientId}] Error setting up market stream:`);
       try {
         socket.send(
           JSON.stringify({
@@ -152,7 +152,7 @@ export async function apiRoutes(app: FastifyInstance) {
           })
         );
       } catch (sendError) {
-        app.log.error(`[${clientId}] Error sending error message:`, sendError);
+        app.log.error({ err: sendError }, `[${clientId}] Error sending error message:`);
       }
       socket.close(1011, 'Internal server error');
     }
