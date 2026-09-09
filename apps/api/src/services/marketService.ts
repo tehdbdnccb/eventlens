@@ -34,7 +34,7 @@ let isFetching = false;
 let consecutiveErrors = 0;
 const MAX_CONSECUTIVE_ERRORS = 5;
 
-async function getMarketsWithCache(): Promise<Market[]> {
+export async function getMarketsWithCache(): Promise<Market[]> {
   const now = Date.now();
   
   // Return cached markets if still valid
@@ -161,7 +161,7 @@ export async function execute(input: {
 }
 
 export function trades() {
-  return adapter.listTrades();
+  return adapter.listTrades ? adapter.listTrades() : [];
 }
 
 export function isLiveMode() {
